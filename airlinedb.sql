@@ -1,72 +1,72 @@
 USE AirlineWEBDB;
 GO
 
--- 1. Independent Table: Aviation_Hubs
-IF OBJECT_ID('Aviation_Hubs', 'U') IS NULL
+-- 1. Airports Table
+IF OBJECT_ID('Airports', 'U') IS NULL
 BEGIN
-    CREATE TABLE Aviation_Hubs (
-        Hub_Code VARCHAR(10) PRIMARY KEY, 
+    CREATE TABLE Airports (
+        AirportCode VARCHAR(10) PRIMARY KEY, 
         City VARCHAR(100) NOT NULL,
         Country VARCHAR(100) NOT NULL
     );
 END
 GO
 
--- 2. Independent Table: Travelers
-IF OBJECT_ID('Travelers', 'U') IS NULL
+-- 2. Passengers Table
+IF OBJECT_ID('Passengers', 'U') IS NULL
 BEGIN
-    CREATE TABLE Travelers (
-        Traveler_ID INT IDENTITY(1,1) PRIMARY KEY, 
-        Full_Name VARCHAR(150) NOT NULL,
-        Email_Address VARCHAR(100) UNIQUE NOT NULL,
-        Contact_Number VARCHAR(20)
+    CREATE TABLE Passengers (
+        PassengerID INT IDENTITY(1,1) PRIMARY KEY, 
+        FullName VARCHAR(150) NOT NULL,
+        Email VARCHAR(100) UNIQUE NOT NULL,
+        Phone VARCHAR(20)
     );
 END
 GO
 
--- 3. Dependent Table: Flight_Schedules
-IF OBJECT_ID('Flight_Schedules', 'U') IS NULL
+-- 3. Flights Table
+IF OBJECT_ID('Flights', 'U') IS NULL
 BEGIN
-    CREATE TABLE Flight_Schedules (
-        Schedule_ID INT IDENTITY(1,1) PRIMARY KEY,
-        Origin_Hub VARCHAR(10) FOREIGN KEY REFERENCES Aviation_Hubs(Hub_Code),
-        Destination_Hub VARCHAR(10) FOREIGN KEY REFERENCES Aviation_Hubs(Hub_Code),
-        Flight_Number VARCHAR(20) UNIQUE NOT NULL,
-        Departure_Time DATETIME NOT NULL,
-        Arrival_Time DATETIME NOT NULL,
-        Total_Capacity INT NOT NULL
+    CREATE TABLE Flights (
+        FlightID INT IDENTITY(1,1) PRIMARY KEY,
+        OriginCode VARCHAR(10) FOREIGN KEY REFERENCES Airports(AirportCode),
+        DestinationCode VARCHAR(10) FOREIGN KEY REFERENCES Airports(AirportCode),
+        FlightNumber VARCHAR(20) UNIQUE NOT NULL,
+        DepartureTime DATETIME NOT NULL,
+        ArrivalTime DATETIME NOT NULL,
+        Capacity INT NOT NULL
     );
 END
 GO
 
--- 4. Dependent Table: Reservations
-IF OBJECT_ID('Reservations', 'U') IS NULL
+-- 4. Bookings Table
+IF OBJECT_ID('Bookings', 'U') IS NULL
 BEGIN
-    CREATE TABLE Reservations (
-        Reservation_ID INT IDENTITY(1,1) PRIMARY KEY,
-        Traveler_ID INT FOREIGN KEY REFERENCES Travelers(Traveler_ID),
-        Schedule_ID INT FOREIGN KEY REFERENCES Flight_Schedules(Schedule_ID),
-        Reservation_Date DATETIME DEFAULT GETDATE(),
+    CREATE TABLE Bookings (
+        BookingID INT IDENTITY(1,1) PRIMARY KEY,
+        PassengerID INT FOREIGN KEY REFERENCES Passengers(PassengerID),
+        FlightID INT FOREIGN KEY REFERENCES Flights(FlightID),
+        BookingDate DATETIME DEFAULT GETDATE(),
         Status VARCHAR(20) DEFAULT 'Confirmed'
     );
 END
 GO
 
--- 5. Dependent Table: Boarding_Passes (Cleanly recreated without Cabin_Class errors)
-DROP TABLE IF EXISTS Boarding_Passes;
+-- 5. Tickets Table
+DROP TABLE IF EXISTS Tickets;
 GO
 
-CREATE TABLE Boarding_Passes (
-    Pass_ID INT IDENTITY(1,1) PRIMARY KEY,
-    Reservation_ID INT FOREIGN KEY REFERENCES Reservations(Reservation_ID),
-    Seat_Allocation VARCHAR(10) NOT NULL,
-    Ticket_Price DECIMAL(10,2) NOT NULL,
-    Issue_Date DATETIME DEFAULT GETDATE()
+CREATE TABLE Tickets (
+    TicketID INT IDENTITY(1,1) PRIMARY KEY,
+    BookingID INT FOREIGN KEY REFERENCES Bookings(BookingID),
+    SeatNumber VARCHAR(10) NOT NULL,
+    Price DECIMAL(10,2) CHECK (Price >= 0),
+    IssueDate DATETIME DEFAULT GETDATE()
 );
 GO
 
--- 1. Upsert Aviation Hubs safely
-MERGE INTO Aviation_Hubs AS target
+-- Seed Airports Data
+MERGE INTO Airports AS target
 USING (VALUES 
     ('KHI', 'Karachi', 'Pakistan'),
     ('LHE', 'Lahore', 'Pakistan'),
@@ -74,15 +74,15 @@ USING (VALUES
     ('MUX', 'Multan', 'Pakistan'),
     ('PEW', 'Peshawar', 'Pakistan'),
     ('SKT', 'Sialkot', 'Pakistan')
-) AS source (Hub_Code, City, Country)
-ON target.Hub_Code = source.Hub_Code
+) AS source (AirportCode, City, Country)
+ON target.AirportCode = source.AirportCode
 WHEN NOT MATCHED THEN
-    INSERT (Hub_Code, City, Country)
-    VALUES (source.Hub_Code, source.City, source.Country);
+    INSERT (AirportCode, City, Country)
+    VALUES (source.AirportCode, source.City, source.Country);
 GO
 
--- 2. Upsert Flight Schedules
-MERGE INTO Flight_Schedules AS target
+-- Seed Flights Data
+MERGE INTO Flights AS target
 USING (VALUES 
     ('KHI', 'ISB', 'PK-300', '2026-10-10 08:00:00', '2026-10-10 10:00:00', 150),
     ('KHI', 'LHE', 'PK-302', '2026-10-11 14:00:00', '2026-10-11 15:45:00', 180),
@@ -92,87 +92,79 @@ USING (VALUES
     ('SKT', 'MUX', 'PK-739', '2026-10-22 20:00:00', '2026-10-23 01:00:00', 230),
     ('SKT', 'PEW', 'PK-799', '2026-10-22 10:00:00', '2026-10-23 01:00:00', 230),
     ('ISB', 'SKT', 'PK-901', '2026-10-12 15:00:00', '2026-10-12 20:00:00', 150)
-) AS source (Origin_Hub, Destination_Hub, Flight_Number, Departure_Time, Arrival_Time, Total_Capacity)
-ON target.Flight_Number = source.Flight_Number
+) AS source (OriginCode, DestinationCode, FlightNumber, DepartureTime, ArrivalTime, Capacity)
+ON target.FlightNumber = source.FlightNumber
 WHEN NOT MATCHED THEN
-    INSERT (Origin_Hub, Destination_Hub, Flight_Number, Departure_Time, Arrival_Time, Total_Capacity)
-    VALUES (source.Origin_Hub, source.Destination_Hub, source.Flight_Number, source.Departure_Time, source.Arrival_Time, source.Total_Capacity);
+    INSERT (OriginCode, DestinationCode, FlightNumber, DepartureTime, ArrivalTime, Capacity)
+    VALUES (source.OriginCode, source.DestinationCode, source.FlightNumber, source.DepartureTime, source.ArrivalTime, source.Capacity);
 GO
 
--- Clean up duplicate constraints/rows if any exist
-IF EXISTS (SELECT * FROM sys.key_constraints WHERE name = 'UQ_Flight_Number')
-BEGIN
-    ALTER TABLE Flight_Schedules DROP CONSTRAINT UQ_Flight_Number;
-END
-GO
-
-UPDATE r 
-SET r.Schedule_ID = p.Min_Schedule_ID
-FROM Reservations r
-JOIN Flight_Schedules fs ON r.Schedule_ID = fs.Schedule_ID
+-- Clean up duplicate schedules if re-running
+UPDATE b 
+SET b.FlightID = p.MinFlightID
+FROM Bookings b
+JOIN Flights f ON b.FlightID = f.FlightID
 JOIN (
-    SELECT MIN(Schedule_ID) AS Min_Schedule_ID, Flight_Number
-    FROM Flight_Schedules
-    GROUP BY Flight_Number
-) p ON fs.Flight_Number = p.Flight_Number
-WHERE fs.Schedule_ID > p.Min_Schedule_ID;
+    SELECT MIN(FlightID) AS MinFlightID, FlightNumber
+    FROM Flights
+    GROUP BY FlightNumber
+) p ON f.FlightNumber = p.FlightNumber
+WHERE f.FlightID > p.MinFlightID;
 GO
 
-DELETE FROM Flight_Schedules 
-WHERE Schedule_ID NOT IN (
-    SELECT MIN(Schedule_ID) 
-    FROM Flight_Schedules 
-    GROUP BY Flight_Number
+DELETE FROM Flights 
+WHERE FlightID NOT IN (
+    SELECT MIN(FlightID) 
+    FROM Flights 
+    GROUP BY FlightNumber
 );
 GO
 
-ALTER TABLE Flight_Schedules ADD CONSTRAINT UQ_Flight_Number UNIQUE (Flight_Number);
+-- Trigger: Automatically generate ticket when booking is inserted
+DROP TRIGGER IF EXISTS trg_GenerateTicket;
 GO
 
--- Cleanly drop and recreate the auto-generation trigger
-DROP TRIGGER IF EXISTS trg_AutoGenerateTicket;
-GO
-
-CREATE TRIGGER trg_AutoGenerateTicket
-ON Reservations
+CREATE TRIGGER trg_GenerateTicket
+ON Bookings
 AFTER INSERT
 AS
 BEGIN
     SET NOCOUNT ON;
-    INSERT INTO Boarding_Passes (Reservation_ID, Seat_Allocation, Ticket_Price)
+    
+    INSERT INTO Tickets (BookingID, SeatNumber, Price)
     SELECT 
-        i.Reservation_ID, 
-        '12A', 
+        i.BookingID, 
+        CONCAT((i.BookingID % 30) + 1, 'A'), -- Dynamic seat allocation like 1A, 2A, etc.
         15000.00
     FROM inserted i;
 END;
 GO
 
--- Backfill tickets for existing reservations that don't have one yet
-INSERT INTO Boarding_Passes (Reservation_ID, Seat_Allocation, Ticket_Price)
-SELECT r.Reservation_ID, '12A', 15000.00
-FROM Reservations r
-WHERE r.Reservation_ID NOT IN (SELECT Reservation_ID FROM Boarding_Passes);
+-- Backfill missing tickets
+INSERT INTO Tickets (BookingID, SeatNumber, Price)
+SELECT b.BookingID, CONCAT((b.BookingID % 30) + 1, 'A'), 15000.00
+FROM Bookings b
+WHERE b.BookingID NOT IN (SELECT BookingID FROM Tickets);
 GO
 
--- VIEW EVERYTHING CLEARLY IN SSMS RESULTS GRID
-SELECT * FROM Aviation_Hubs;
-SELECT * FROM Flight_Schedules;
-SELECT * FROM Travelers;
-SELECT * FROM Reservations;
-SELECT * FROM Boarding_Passes;
+-- Quick Data Overview
+SELECT * FROM Airports;
+SELECT * FROM Flights;
+SELECT * FROM Passengers;
+SELECT * FROM Bookings;
+SELECT * FROM Tickets;
 
--- CUSTOMER & TICKET JOIN VIEW
+-- Passenger & Ticket Summary Query
 SELECT 
-    t.Traveler_ID,
-    t.Full_Name,
-    t.Email_Address,
-    r.Reservation_ID,
-    r.Schedule_ID,
-    bp.Pass_ID,
-    bp.Seat_Allocation,
-    bp.Ticket_Price
-FROM Travelers t
-JOIN Reservations r ON t.Traveler_ID = r.Traveler_ID
-JOIN Boarding_Passes bp ON r.Reservation_ID = bp.Reservation_ID;
+    p.PassengerID,
+    p.FullName,
+    p.Email,
+    b.BookingID,
+    f.FlightNumber,
+    t.SeatNumber,
+    t.Price
+FROM Passengers p
+JOIN Bookings b ON p.PassengerID = b.PassengerID
+JOIN Flights f ON b.FlightID = f.FlightID
+JOIN Tickets t ON b.BookingID = t.BookingID;
 GO
