@@ -1,3 +1,6 @@
+CREATE DATABASE AirlineWEBDB;
+GO
+
 USE AirlineWEBDB;
 GO
 
@@ -47,22 +50,23 @@ BEGIN
         PassengerID INT FOREIGN KEY REFERENCES Passengers(PassengerID),
         FlightID INT FOREIGN KEY REFERENCES Flights(FlightID),
         BookingDate DATETIME DEFAULT GETDATE(),
-        Status VARCHAR(20) DEFAULT 'Confirmed'
+        Status VARCHAR(20) DEFAULT 'Confirmed',
+        CONSTRAINT UQ_Passenger_Flight UNIQUE(PassengerID, FlightID)
     );
 END
 GO
 
 -- 5. Tickets Table
-DROP TABLE IF EXISTS Tickets;
-GO
-
-CREATE TABLE Tickets (
-    TicketID INT IDENTITY(1,1) PRIMARY KEY,
-    BookingID INT FOREIGN KEY REFERENCES Bookings(BookingID),
-    SeatNumber VARCHAR(10) NOT NULL,
-    Price DECIMAL(10,2) CHECK (Price >= 0),
-    IssueDate DATETIME DEFAULT GETDATE()
-);
+IF OBJECT_ID('Tickets', 'U') IS NULL
+BEGIN
+    CREATE TABLE Tickets (
+        TicketID INT IDENTITY(1,1) PRIMARY KEY,
+        BookingID INT UNIQUE FOREIGN KEY REFERENCES Bookings(BookingID),
+        SeatNumber VARCHAR(10) NOT NULL,
+        Price DECIMAL(10,2) CHECK (Price >= 0),
+        IssueDate DATETIME DEFAULT GETDATE()
+    );
+END
 GO
 
 -- Seed Airports Data
@@ -99,72 +103,47 @@ WHEN NOT MATCHED THEN
     VALUES (source.OriginCode, source.DestinationCode, source.FlightNumber, source.DepartureTime, source.ArrivalTime, source.Capacity);
 GO
 
--- Clean up duplicate schedules if re-running
-UPDATE b 
-SET b.FlightID = p.MinFlightID
-FROM Bookings b
-JOIN Flights f ON b.FlightID = f.FlightID
-JOIN (
-    SELECT MIN(FlightID) AS MinFlightID, FlightNumber
-    FROM Flights
-    GROUP BY FlightNumber
-) p ON f.FlightNumber = p.FlightNumber
-WHERE f.FlightID > p.MinFlightID;
-GO
-
-DELETE FROM Flights 
-WHERE FlightID NOT IN (
-    SELECT MIN(FlightID) 
-    FROM Flights 
-    GROUP BY FlightNumber
-);
-GO
-
--- Trigger: Automatically generate ticket when booking is inserted
-DROP TRIGGER IF EXISTS trg_GenerateTicket;
-GO
-
-CREATE TRIGGER trg_GenerateTicket
-ON Bookings
-AFTER INSERT
+-- Stored Procedure: Safe Booking Execution
+CREATE OR ALTER PROCEDURE sp_BookFlight
+    @PassengerID INT,
+    @FlightID INT,
+    @SeatNumber VARCHAR(10),
+    @Price DECIMAL(10,2)
 AS
 BEGIN
     SET NOCOUNT ON;
     
-    INSERT INTO Tickets (BookingID, SeatNumber, Price)
-    SELECT 
-        i.BookingID, 
-        CONCAT((i.BookingID % 30) + 1, 'A'), -- Dynamic seat allocation like 1A, 2A, etc.
-        15000.00
-    FROM inserted i;
+    DECLARE @CurrentBookings INT;
+    DECLARE @Capacity INT;
+    
+    SELECT @Capacity = Capacity FROM Flights WHERE FlightID = @FlightID;
+    SELECT @CurrentBookings = COUNT(*) FROM Bookings WHERE FlightID = @FlightID AND Status = 'Confirmed';
+    
+    IF @CurrentBookings >= @Capacity
+    BEGIN
+        RAISERROR('Flight is fully booked.', 16, 1);
+        RETURN;
+    END;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        
+        DECLARE @NewBookingID INT;
+        
+        INSERT INTO Bookings (PassengerID, FlightID, BookingDate, Status)
+        VALUES (@PassengerID, @FlightID, GETDATE(), 'Confirmed');
+        
+        SET @NewBookingID = SCOPE_IDENTITY();
+        
+        INSERT INTO Tickets (BookingID, SeatNumber, Price, IssueDate)
+        VALUES (@NewBookingID, @SeatNumber, @Price, GETDATE());
+        
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
 END;
-GO
-
--- Backfill missing tickets
-INSERT INTO Tickets (BookingID, SeatNumber, Price)
-SELECT b.BookingID, CONCAT((b.BookingID % 30) + 1, 'A'), 15000.00
-FROM Bookings b
-WHERE b.BookingID NOT IN (SELECT BookingID FROM Tickets);
-GO
-
--- Quick Data Overview
-SELECT * FROM Airports;
-SELECT * FROM Flights;
-SELECT * FROM Passengers;
-SELECT * FROM Bookings;
-SELECT * FROM Tickets;
-
--- Passenger & Ticket Summary Query
-SELECT 
-    p.PassengerID,
-    p.FullName,
-    p.Email,
-    b.BookingID,
-    f.FlightNumber,
-    t.SeatNumber,
-    t.Price
-FROM Passengers p
-JOIN Bookings b ON p.PassengerID = b.PassengerID
-JOIN Flights f ON b.FlightID = f.FlightID
-JOIN Tickets t ON b.BookingID = t.BookingID;
 GO
